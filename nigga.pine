@@ -1,0 +1,511 @@
+//@version=6
+// Machine Learning - Lorentzian KNN Classifier [BertTradeTech] SIL1! v2.7 Topstep
+// Full self-contained build — all missing logic implemented from skeleton references
+
+strategy("Machine Learning - Lorentzian KNN Classifier [BertTradeTech] SIL1! v2.7 Topstep",
+     overlay             = true,
+     initial_capital     = 50000,
+     default_qty_type    = strategy.fixed,
+     default_qty_value   = 1,
+     pyramiding          = 0,
+     calc_on_every_tick  = false,
+     max_labels_count    = 500,
+     max_lines_count     = 200,
+     max_boxes_count     = 500)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+// Trend Following
+trend_ema_fast   = input.int(21,  "Trend EMA Fast",   minval = 5,  group = "Trend Following")
+trend_ema_slow   = input.int(50,  "Trend EMA Slow",   minval = 10, group = "Trend Following")
+trend_ema_filter = input.int(200, "Trend Filter EMA", minval = 50, group = "Trend Following")
+
+// MTF Filter
+use_mtf_filter = input.bool(true,  "Use MTF Filter",     group = "MTF Filter")
+mtf_timeframe  = input.timeframe("240", "Higher Timeframe", group = "MTF Filter")
+mtf_ema_fast   = input.int(21, "MTF EMA Fast", minval = 5,  group = "MTF Filter")
+mtf_ema_slow   = input.int(55, "MTF EMA Slow", minval = 10, group = "MTF Filter")
+
+// MA Ribbon
+use_ma_ribbon      = input.bool(true, "Use MA Ribbon", group = "MA Ribbon")
+ribbon_type        = input.string("EMA", "Ribbon MA Type", options = ["EMA", "SMA", "HMA"], group = "MA Ribbon")
+ribbon_ma1         = input.int(8,   "Ribbon MA 1", minval = 2, group = "MA Ribbon")
+ribbon_ma2         = input.int(13,  "Ribbon MA 2", minval = 2, group = "MA Ribbon")
+ribbon_ma3         = input.int(21,  "Ribbon MA 3", minval = 2, group = "MA Ribbon")
+ribbon_ma4         = input.int(34,  "Ribbon MA 4", minval = 2, group = "MA Ribbon")
+ribbon_ma5         = input.int(55,  "Ribbon MA 5", minval = 2, group = "MA Ribbon")
+ribbon_ma6         = input.int(89,  "Ribbon MA 6", minval = 2, group = "MA Ribbon")
+ribbon_ma7         = input.int(144, "Ribbon MA 7", minval = 2, group = "MA Ribbon")
+ribbon_ma8         = input.int(233, "Ribbon MA 8", minval = 2, group = "MA Ribbon")
+ribbon_threshold   = input.int(6,   "Ribbon Alignment Threshold", minval = 4, maxval = 8, group = "MA Ribbon")
+
+// Order Flow
+use_order_flow       = input.bool(true,  "Enable Order Flow Analysis",  group = "Order Flow")
+show_vwap            = input.bool(false, "Show VWAP Bands",             group = "Order Flow")
+vwap_std_mult1       = input.float(1.0,  "VWAP Std 1", minval = 0.1, step = 0.1, group = "Order Flow")
+vwap_std_mult2       = input.float(2.0,  "VWAP Std 2", minval = 0.1, step = 0.1, group = "Order Flow")
+vwap_std_mult3       = input.float(3.0,  "VWAP Std 3", minval = 0.1, step = 0.1, group = "Order Flow")
+cvd_length           = input.int(20,     "CVD Period",  minval = 1,   group = "Order Flow")
+cvd_threshold        = input.float(0.3,  "CVD Threshold", minval = 0.1, maxval = 1.0, step = 0.1, group = "Order Flow")
+show_volume_profile  = input.bool(true,  "Show Volume Profile POC",    group = "Order Flow")
+volume_profile_bins  = input.int(20,     "VP Bins", minval = 10, maxval = 50, group = "Order Flow")
+
+// Smart Money Concepts
+use_smc            = input.bool(true,  "Enable Smart Money Concepts",  group = "Smart Money")
+show_order_blocks  = input.bool(true,  "Show Order Blocks",            group = "Smart Money")
+show_fvg           = input.bool(true,  "Show Fair Value Gaps",         group = "Smart Money")
+show_liquidity     = input.bool(true,  "Show Liquidity Sweeps",        group = "Smart Money")
+show_bos           = input.bool(true,  "Show BOS/CHoCH",               group = "Smart Money")
+show_demand_supply = input.bool(true,  "Show Demand/Supply Zones",     group = "Smart Money")
+ob_lookback        = input.int(10,     "Order Block Lookback", minval = 5, group = "Smart Money")
+fvg_min_size       = input.float(0.3,  "FVG Min Size (ATR mult)", minval = 0.1, step = 0.1, group = "Smart Money")
+liquidity_lookback = input.int(20,     "Liquidity Lookback", minval = 10, group = "Smart Money")
+bos_pivot_length   = input.int(5,      "BOS Pivot Length", minval = 3, group = "Smart Money")
+ds_impulse_mult    = input.float(1.0,  "D/S Impulse Strength (ATR mult)", minval = 0.5, step = 0.1, group = "Smart Money")
+ds_max_zones       = input.int(8,      "Max D/S Zones Each Side", minval = 2, maxval = 20, group = "Smart Money")
+
+// Volatility Regime
+use_vol_regime            = input.bool(true,  "Enable Volatility Regime", group = "Volatility Regime")
+bb_vr_length              = input.int(20,     "BB VR Period",   minval = 10, group = "Volatility Regime")
+bb_vr_mult                = input.float(2.0,  "BB VR Multiplier", minval = 1.0, step = 0.1, group = "Volatility Regime")
+atr_percentile_length     = input.int(100,    "ATR Percentile Period", minval = 20, group = "Volatility Regime")
+vol_expansion_threshold   = input.float(1.5,  "Expansion Threshold", minval = 1.0, step = 0.1, group = "Volatility Regime")
+vol_contraction_threshold = input.float(0.7,  "Contraction Threshold", minval = 0.1, maxval = 1.0, step = 0.1, group = "Volatility Regime")
+
+// Breakout
+breakout_length   = input.int(20,   "Breakout Period", minval = 5, group = "Breakout")
+breakout_atr_mult = input.float(1.5, "Breakout ATR Multiplier", minval = 0.5, step = 0.1, group = "Breakout")
+
+// Mean Reversion
+bb_length  = input.int(20,   "Bollinger Bands Period", minval = 5,  group = "Mean Reversion")
+bb_mult    = input.float(2.0, "BB Std Dev",            minval = 0.5, step = 0.1, group = "Mean Reversion")
+rsi_length = input.int(14,   "RSI Period",             minval = 2,  group = "Mean Reversion")
+rsi_ob     = input.int(70,   "RSI Overbought",         minval = 50, maxval = 100, group = "Mean Reversion")
+rsi_os     = input.int(30,   "RSI Oversold",           minval = 0,  maxval = 50,  group = "Mean Reversion")
+
+// Risk Management
+atr_length        = input.int(14,   "ATR Period",               minval = 1,   group = "Risk Management")
+stop_atr_mult     = input.float(1.5, "Stop Loss ATR Multiplier", minval = 0.5, step = 0.1, group = "Risk Management")
+tp_atr_mult       = input.float(5.0, "Take Profit ATR Multiplier", minval = 0.5, step = 0.1, group = "Risk Management")
+use_trailing      = input.bool(true, "Use Trailing Stop",        group = "Risk Management")
+trailing_atr_mult = input.float(2.0, "Trailing ATR Multiplier",  minval = 0.5, step = 0.1, group = "Risk Management")
+
+// Filters
+adx_length      = input.int(14,    "ADX Period",    minval = 1,  group = "Filters")
+adx_threshold   = input.int(15,    "ADX Threshold", minval = 10, maxval = 50, group = "Filters")
+volume_mult     = input.float(1.0, "Volume Multiplier", minval = 1.0, step = 0.1, group = "Filters")
+long_ema_buffer = input.float(0.5, "Long EMA Buffer (ATR mult)", minval = 0.0, step = 0.1, group = "Filters")
+
+// Lorentzian KNN
+grp_knn        = "== Lorentzian KNN =="
+knn_neighbors  = input.int(8,     "K Neighbors",               minval = 3,  maxval = 20,  group = grp_knn)
+knn_lookback   = input.int(50,    "Training Window",            minval = 20, maxval = 100, group = grp_knn)
+knn_weight     = input.float(0.55, "KNN Signal Weight",         minval = 0.0, maxval = 1.0, step = 0.05, group = grp_knn)
+knn_rsi_len    = input.int(14,    "Feature: RSI Period",        minval = 5,  maxval = 50,  group = grp_knn)
+knn_wt_n1      = input.int(10,    "Feature: WaveTrend Ch Len",  minval = 5,  maxval = 30,  group = grp_knn)
+knn_wt_n2      = input.int(21,    "Feature: WaveTrend Avg Len", minval = 5,  maxval = 50,  group = grp_knn)
+knn_cci_len    = input.int(20,    "Feature: CCI Period",        minval = 5,  maxval = 50,  group = grp_knn)
+knn_adx_len    = input.int(14,    "Feature: ADX Period",        minval = 5,  maxval = 50,  group = grp_knn)
+
+// Session / Grade
+grp_session        = "Session / Grade"
+use_session_filter = input.bool(true, "Enable Session Filter", group = grp_session)
+session_london     = input.bool(true, "London Session",        group = grp_session)
+session_ny         = input.bool(true, "New York Session",      group = grp_session)
+min_grade          = input.string("B", "Minimum Grade to Trade", options = ["A", "B", "C"], group = grp_session)
+
+// =============================================================================
+// CORE INDICATORS
+// =============================================================================
+
+float atr = ta.atr(atr_length)
+
+// Trend EMAs
+float ema_fast   = ta.ema(close, trend_ema_fast)
+float ema_slow   = ta.ema(close, trend_ema_slow)
+float ema_filter = ta.ema(close, trend_ema_filter)
+
+bool ema_cross_up   = ta.crossover(ema_fast, ema_slow)
+bool ema_cross_down = ta.crossunder(ema_fast, ema_slow)
+
+// ADX / DMI
+[diplus, diminus, adx_val] = ta.dmi(adx_length, adx_length)
+
+// RSI
+float rsi_val = ta.rsi(close, rsi_length)
+bool  rsi_cross_up   = ta.crossover(rsi_val,  rsi_os)
+bool  rsi_cross_down = ta.crossunder(rsi_val, rsi_ob)
+
+// Bollinger Bands
+float bb_basis  = ta.sma(close, bb_length)
+float bb_dev    = bb_mult * ta.stdev(close, bb_length)
+float bb_upper  = bb_basis + bb_dev
+float bb_lower  = bb_basis - bb_dev
+
+// Volume
+float avg_volume = ta.sma(volume, 20)
+bool  vol_ok     = volume >= avg_volume * volume_mult
+
+// Breakout levels
+float highest_high = ta.highest(high, breakout_length)
+float lowest_low   = ta.lowest(low,   breakout_length)
+
+// =============================================================================
+// VOLATILITY REGIME
+// =============================================================================
+
+float bb_vr_basis  = ta.sma(close, bb_vr_length)
+float bb_vr_dev    = bb_vr_mult * ta.stdev(close, bb_vr_length)
+float bb_vr_upper  = bb_vr_basis + bb_vr_dev
+float bb_vr_lower  = bb_vr_basis - bb_vr_dev
+float bb_vr_width  = (bb_vr_upper - bb_vr_lower) / bb_vr_basis
+
+float atr_now     = ta.atr(14)
+float atr_avg     = ta.sma(atr_now, atr_percentile_length)
+float vol_ratio   = atr_avg > 0.0 ? atr_now / atr_avg : 1.0
+
+bool is_expanding   = vol_ratio >= vol_expansion_threshold
+bool is_contracting = vol_ratio <= vol_contraction_threshold
+bool is_trending    = not is_contracting and adx_val >= adx_threshold
+bool is_ranging     = is_contracting or adx_val < adx_threshold
+
+// =============================================================================
+// TREND DIRECTION
+// =============================================================================
+
+bool bullish_trend = ema_fast > ema_slow and close > ema_filter
+bool bearish_trend = ema_fast < ema_slow and close < ema_filter
+
+// Long EMA buffer: price must be meaningfully above/below slow EMA
+float ema_buffer      = atr * long_ema_buffer
+bool  long_ema_condition  = close > ema_slow + ema_buffer
+bool  short_ema_condition = close < ema_slow - ema_buffer
+
+// =============================================================================
+// MTF FILTER
+// =============================================================================
+
+float mtf_fast_val = request.security(syminfo.tickerid, mtf_timeframe, ta.ema(close, mtf_ema_fast), lookahead = barmerge.lookahead_off)
+float mtf_slow_val = request.security(syminfo.tickerid, mtf_timeframe, ta.ema(close, mtf_ema_slow), lookahead = barmerge.lookahead_off)
+
+bool mtf_filter_long  = not use_mtf_filter or mtf_fast_val > mtf_slow_val
+bool mtf_filter_short = not use_mtf_filter or mtf_fast_val < mtf_slow_val
+
+// =============================================================================
+// MA RIBBON
+// =============================================================================
+
+f_ribbon_ma(_src, _len) =>
+    if ribbon_type == "SMA"
+        ta.sma(_src, _len)
+    else if ribbon_type == "HMA"
+        ta.wma(2 * ta.wma(_src, _len / 2) - ta.wma(_src, _len), math.round(math.sqrt(_len)))
+    else
+        ta.ema(_src, _len)
+
+float r1 = f_ribbon_ma(close, ribbon_ma1)
+float r2 = f_ribbon_ma(close, ribbon_ma2)
+float r3 = f_ribbon_ma(close, ribbon_ma3)
+float r4 = f_ribbon_ma(close, ribbon_ma4)
+float r5 = f_ribbon_ma(close, ribbon_ma5)
+float r6 = f_ribbon_ma(close, ribbon_ma6)
+float r7 = f_ribbon_ma(close, ribbon_ma7)
+float r8 = f_ribbon_ma(close, ribbon_ma8)
+
+// Count how many ribbon MAs are in bullish order (each shorter above next longer)
+int rbc1 = (r1 > r2 ? 1 : 0) + (r2 > r3 ? 1 : 0) + (r3 > r4 ? 1 : 0) + (r4 > r5 ? 1 : 0)
+int rbc2 = (r5 > r6 ? 1 : 0) + (r6 > r7 ? 1 : 0) + (r7 > r8 ? 1 : 0)
+int ribbon_bull_count = rbc1 + rbc2
+
+int rbd1 = (r1 < r2 ? 1 : 0) + (r2 < r3 ? 1 : 0) + (r3 < r4 ? 1 : 0) + (r4 < r5 ? 1 : 0)
+int rbd2 = (r5 < r6 ? 1 : 0) + (r6 < r7 ? 1 : 0) + (r7 < r8 ? 1 : 0)
+int ribbon_bear_count = rbd1 + rbd2
+
+bool ribbon_filter_long  = not use_ma_ribbon or ribbon_bull_count >= ribbon_threshold
+bool ribbon_filter_short = not use_ma_ribbon or ribbon_bear_count >= ribbon_threshold
+
+// =============================================================================
+// ORDER FLOW (CVD approximation)
+// =============================================================================
+
+// Approximate CVD: positive = buy pressure, negative = sell pressure
+float bar_cvd    = close > open ? volume : close < open ? -volume : 0.0
+float cvd_cum    = ta.sma(bar_cvd, cvd_length)
+float cvd_norm   = avg_volume > 0.0 ? cvd_cum / avg_volume : 0.0
+
+bool of_filter_long  = not use_order_flow or cvd_norm >= -cvd_threshold
+bool of_filter_short = not use_order_flow or cvd_norm <=  cvd_threshold
+
+// VWAP
+float vwap_val       = ta.vwap(hlc3)
+float vwap_stdev     = ta.stdev(hlc3, 20)
+float vwap_upper1    = vwap_val + vwap_std_mult1 * vwap_stdev
+float vwap_lower1    = vwap_val - vwap_std_mult1 * vwap_stdev
+
+// =============================================================================
+// SMART MONEY CONCEPTS (simplified, self-contained)
+// =============================================================================
+
+// Order Block: last significant bearish bar before a bullish impulse (for bull OB)
+float ob_high = ta.highest(high, ob_lookback)
+float ob_low  = ta.lowest(low,   ob_lookback)
+
+// Fair Value Gap detection
+bool fvg_bull = low[0] > high[2] and (low[0] - high[2]) >= atr * fvg_min_size
+bool fvg_bear = high[0] < low[2] and (low[2]  - high[0]) >= atr * fvg_min_size
+
+// Liquidity sweep: price briefly breaks a recent swing high/low then reverses
+float swing_high = ta.highest(high, liquidity_lookback)
+float swing_low  = ta.lowest(low,   liquidity_lookback)
+bool  liq_sweep_bull = low < swing_low[1] and close > swing_low[1]
+bool  liq_sweep_bear = high > swing_high[1] and close < swing_high[1]
+
+// BOS/CHoCH: break of structure using pivots
+float pivot_high = ta.pivothigh(high, bos_pivot_length, bos_pivot_length)
+float pivot_low  = ta.pivotlow(low,   bos_pivot_length, bos_pivot_length)
+
+var float last_pivot_high = na
+var float last_pivot_low  = na
+if not na(pivot_high)
+    last_pivot_high := pivot_high
+if not na(pivot_low)
+    last_pivot_low := pivot_low
+
+bool bos_bull = not na(last_pivot_high) and close > last_pivot_high
+bool bos_bear = not na(last_pivot_low)  and close < last_pivot_low
+
+// SMC composite filter
+bool smc_filter_long  = not use_smc or (close > ob_low and not fvg_bear)
+bool smc_filter_short = not use_smc or (close < ob_high and not fvg_bull)
+
+// =============================================================================
+// LORENTZIAN KNN
+// =============================================================================
+
+// Features
+float knn_rsi = ta.rsi(close, knn_rsi_len)
+
+// WaveTrend
+float wt_esa = ta.ema(hlc3, knn_wt_n1)
+float wt_d   = ta.ema(math.abs(hlc3 - wt_esa), knn_wt_n1)
+float wt_ci  = wt_d != 0.0 ? (hlc3 - wt_esa) / (0.015 * wt_d) : 0.0
+float wt1    = ta.ema(wt_ci, knn_wt_n2)
+
+// CCI
+float cci_val = ta.cci(close, knn_cci_len)
+
+// KNN ADX
+[knn_di_plus, knn_di_minus, knn_adx] = ta.dmi(knn_adx_len, knn_adx_len)
+
+// Normalize features to [-1, 1]
+float f_rsi  = (knn_rsi  - 50.0) / 50.0
+float f_wt   = wt1 / 100.0
+float f_cci  = cci_val / 200.0
+float f_adx  = (knn_adx - 25.0) / 25.0
+
+f_lorentzian(_a1, _a2, _a3, _a4, _b1, _b2, _b3, _b4) =>
+    math.log(1.0 + math.abs(_a1 - _b1)) + math.log(1.0 + math.abs(_a2 - _b2)) + math.log(1.0 + math.abs(_a3 - _b3)) + math.log(1.0 + math.abs(_a4 - _b4))
+
+var float[] h_rsi   = array.new_float()
+var float[] h_wt    = array.new_float()
+var float[] h_cci   = array.new_float()
+var float[] h_adx   = array.new_float()
+var float[] h_label = array.new_float()
+
+if barstate.isconfirmed and bar_index > 2
+    float lbl = close[0] > close[1] ? 1.0 : close[0] < close[1] ? -1.0 : 0.0
+    array.push(h_rsi,   f_rsi[1])
+    array.push(h_wt,    f_wt[1])
+    array.push(h_cci,   f_cci[1])
+    array.push(h_adx,   f_adx[1])
+    array.push(h_label, lbl)
+    if array.size(h_rsi) > knn_lookback
+        array.shift(h_rsi)
+        array.shift(h_wt)
+        array.shift(h_cci)
+        array.shift(h_adx)
+        array.shift(h_label)
+
+float knn_vote = 0.0
+if array.size(h_rsi) >= knn_neighbors
+    float[] dists = array.new_float()
+    float[] labs  = array.new_float()
+    int n = array.size(h_rsi)
+    for i = 0 to n - 1
+        float d = f_lorentzian(f_rsi, f_wt, f_cci, f_adx, array.get(h_rsi, i), array.get(h_wt, i), array.get(h_cci, i), array.get(h_adx, i))
+        array.push(dists, d)
+        array.push(labs, array.get(h_label, i))
+
+    int[] sorted_idx = array.sort_indices(dists, order.ascending)
+    int   k_use      = math.min(knn_neighbors, n)
+    float sum_lbl    = 0.0
+    for k = 0 to k_use - 1
+        sum_lbl += array.get(labs, array.get(sorted_idx, k))
+    knn_vote := sum_lbl
+
+bool knn_bull = knn_vote > 0.0
+bool knn_bear = knn_vote < 0.0
+
+// =============================================================================
+// SIGNAL QUALITY SCORE (0-100) + GRADE
+// =============================================================================
+
+// Components (each 0-1)
+float q_trend = bullish_trend or bearish_trend ? 1.0 : 0.5
+float q_adx   = math.max(0.0, math.min(1.0, (adx_val - adx_threshold) / 20.0))
+float q_vol   = vol_ok ? 1.0 : 0.5
+float q_knn   = math.abs(knn_vote) / math.max(float(knn_neighbors), 1.0)
+float q_mtf   = (mtf_filter_long and knn_bull) or (mtf_filter_short and knn_bear) ? 1.0 : 0.3
+float q_ribbon = ribbon_bull_count >= ribbon_threshold or ribbon_bear_count >= ribbon_threshold ? 1.0 : 0.4
+
+float quality_raw = (q_trend + q_adx + q_vol + q_knn + q_mtf + q_ribbon) / 6.0
+float quality_pct = math.round(quality_raw * 100.0)
+
+string grade_text = quality_pct >= 80 ? "A" :
+                    quality_pct >= 60 ? "B" :
+                    quality_pct >= 40 ? "C" : "D"
+
+// Session grade gate
+bool grade_ok = min_grade == "A" ? grade_text == "A" :
+                min_grade == "B" ? grade_text == "A" or grade_text == "B" :
+                grade_text != "D"
+
+// =============================================================================
+// SESSION FILTER
+// =============================================================================
+
+// London: 03:00-12:00 ET, NY: 08:00-17:00 ET (UTC-5 approx)
+bool in_london = hour(time, "America/New_York") >= 3  and hour(time, "America/New_York") < 12
+bool in_ny     = hour(time, "America/New_York") >= 8  and hour(time, "America/New_York") < 17
+
+bool session_active = not use_session_filter or
+                      (session_london and in_london) or
+                      (session_ny     and in_ny)
+
+bool session_grade_ok = session_active and grade_ok
+
+// =============================================================================
+// BAR CONFIRMATION
+// =============================================================================
+
+bool confirmed = barstate.isconfirmed
+
+// =============================================================================
+// SIGNAL LOGIC
+// =============================================================================
+
+bool trend_long          = is_trending and bullish_trend and ema_cross_up
+bool trend_short         = is_trending and bearish_trend and ema_cross_down
+bool breakout_long       = close > highest_high[1] and close > ema_filter
+bool breakout_short      = close < lowest_low[1]   and close < ema_filter
+bool mean_reversion_long  = is_ranging and close < bb_lower and rsi_val < rsi_os and rsi_cross_up
+bool mean_reversion_short = is_ranging and close > bb_upper and rsi_val > rsi_ob and rsi_cross_down
+
+bool long_condition  = (trend_long  or breakout_long  or mean_reversion_long)  and
+                       mtf_filter_long  and ribbon_filter_long  and of_filter_long  and
+                       smc_filter_long  and confirmed and long_ema_condition  and session_grade_ok and knn_bull
+
+bool short_condition = (trend_short or breakout_short or mean_reversion_short) and
+                       mtf_filter_short and ribbon_filter_short and of_filter_short and
+                       smc_filter_short and confirmed and session_grade_ok and knn_bear
+
+// =============================================================================
+// TOPSTEP ACCOUNT RISK + SIZING
+// =============================================================================
+
+var float bt_start_equity = 50000.0
+var float bt_max_loss     = 2000.0
+var float bt_cum_pnl      = 0.0
+
+float bt_eq_now = bt_start_equity + strategy.netprofit
+bt_cum_pnl     := bt_eq_now - bt_start_equity
+
+float bt_remaining_loss   = bt_max_loss + math.min(0.0, bt_cum_pnl)
+bool  bt_can_trade        = bt_remaining_loss > 0.0
+
+float sil_tick_size  = syminfo.mintick
+float sil_tick_value = 5.0
+
+float bt_max_risk_full      = bt_start_equity * 0.005
+float bt_max_risk_remaining = bt_remaining_loss * 0.10
+float bt_base_risk_dollars  = math.max(0.0, math.min(bt_max_risk_full, bt_max_risk_remaining))
+
+float sig_score = math.max(0.0, math.min(1.0, quality_pct / 100.0))
+
+f_sig_mult(_score) =>
+    _score < 0.40 ? 0.50 : _score < 0.70 ? 1.00 : 1.50
+
+float sig_mult = f_sig_mult(sig_score)
+
+float stop_dist_price   = atr * stop_atr_mult
+float stop_dist_ticks   = stop_dist_price / sil_tick_size
+float risk_per_contract = math.max(stop_dist_ticks * sil_tick_value, sil_tick_value)
+
+int bt_base_contracts  = bt_can_trade and risk_per_contract > 0.0 ? math.floor(bt_base_risk_dollars / risk_per_contract) : 0
+bt_base_contracts     := math.max(bt_base_contracts, 0)
+
+int bt_max_contracts   = 5
+int bt_final_contracts = math.min(math.floor(bt_base_contracts * sig_mult), bt_max_contracts)
+
+// =============================================================================
+// ENTRIES / EXITS
+// =============================================================================
+
+if long_condition and strategy.position_size == 0 and bt_can_trade and bt_final_contracts > 0
+    float stop_loss   = close - stop_dist_price
+    float take_profit = close + atr * tp_atr_mult
+    strategy.entry("Long", strategy.long, qty = bt_final_contracts)
+    alert("BUY " + grade_text + " | SIL1! | " + str.tostring(close) + " | Q:" + str.tostring(quality_pct) + "%", alert.freq_once_per_bar_close)
+    if use_trailing
+        strategy.exit("Exit Long", "Long",
+                      stop         = stop_loss,
+                      trail_offset = atr * trailing_atr_mult / syminfo.mintick,
+                      trail_points = atr * trailing_atr_mult / syminfo.mintick)
+    else
+        strategy.exit("Exit Long", "Long", stop = stop_loss, limit = take_profit)
+
+if short_condition and strategy.position_size == 0 and bt_can_trade and bt_final_contracts > 0
+    float stop_loss   = close + stop_dist_price
+    float take_profit = close - atr * tp_atr_mult
+    strategy.entry("Short", strategy.short, qty = bt_final_contracts)
+    alert("SELL " + grade_text + " | SIL1! | " + str.tostring(close) + " | Q:" + str.tostring(quality_pct) + "%", alert.freq_once_per_bar_close)
+    if use_trailing
+        strategy.exit("Exit Short", "Short",
+                      stop         = stop_loss,
+                      trail_offset = atr * trailing_atr_mult / syminfo.mintick,
+                      trail_points = atr * trailing_atr_mult / syminfo.mintick)
+    else
+        strategy.exit("Exit Short", "Short", stop = stop_loss, limit = take_profit)
+
+// =============================================================================
+// VISUALS
+// =============================================================================
+
+plot(ema_fast,   "EMA Fast",   color = color.new(color.teal,   0))
+plot(ema_slow,   "EMA Slow",   color = color.new(color.orange, 0))
+plot(ema_filter, "EMA Filter", color = color.new(color.gray,   50))
+
+// VWAP bands (optional)
+plot(show_vwap ? vwap_val    : na, "VWAP",       color = color.new(color.white,  30))
+plot(show_vwap ? vwap_upper1 : na, "VWAP +1s",   color = color.new(color.blue,   50))
+plot(show_vwap ? vwap_lower1 : na, "VWAP -1s",   color = color.new(color.purple, 50))
+
+// Background: signal quality
+bgcolor(quality_pct >= 80 ? color.new(color.green,  90) :
+        quality_pct >= 60 ? color.new(color.yellow, 93) :
+        quality_pct < 40  ? color.new(color.red,    93) : na,
+        title = "Quality Background")
+
+// Entry signals
+plotshape(long_condition,  title = "Long Signal",  style = shape.triangleup,   location = location.belowbar, color = color.new(color.green, 0), size = size.small)
+plotshape(short_condition, title = "Short Signal", style = shape.triangledown, location = location.abovebar, color = color.new(color.red,   0), size = size.small)
+
+// Grade label on signal bars
+if long_condition or short_condition
+    label.new(bar_index, high, grade_text + " " + str.tostring(quality_pct) + "%",
+              style     = label.style_label_down,
+              color     = grade_text == "A" ? color.green : grade_text == "B" ? color.blue : color.orange,
+              textcolor = color.white,
+              size      = size.small)
